@@ -1,0 +1,82 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+trigger:
+- master
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+- group: VMOptions
+- group: ExternalServicePrincipals
+- name: TF_IN_AUTOMATION
+  value: "true"
+
+stages:
+- stage: Build
+  displayName: 'Build'
+  jobs:
+  - job: build
+    displayName: '🗓️ Terraform Plan'
+    steps:
+      - task: Bash@3
+        displayName: "Terraform Validate"
+        inputs:
+          targetType: 'inline'
+          script: |
+            terraform init
+            terraform validate
+          workingDirectory: 'tf'
+
+      - task: Bash@3
+        displayName: "Generate Plan"
+        inputs:
+          targetType: 'inline'
+          script: |
+            # Set Service Principal for login
+            export ARM_SUBSCRIPTION_ID="$(customer1-subscriptionId)"
+            export ARM_CLIENT_ID="$(customer1-clientId)"
+            export ARM_CLIENT_SECRET="$(customer1-clientSecret)"
+            export ARM_TENANT_ID="$(customer1-tenantId)"
+
+            # Create plan in tfplan directory
+            terraform plan -out tfplan -no-color -input=false
+          workingDirectory: 'tf'
+
+      - task: PublishPipelineArtifact@1
+        displayName: "Publish Plan"
+        inputs:
+          path: $(System.DefaultWorkingDirectory)/tf
+          artifact: plan
+          
+- stage: Release
+  displayName: 'Release'
+  jobs:
+  - deployment: release
+    displayName: "🤯 Terraform Apply"
+    environment: Production
+    workspace:
+      clean: all
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: Bash@3
+            displayName: "Apply Plan"
+            inputs:
+              targetType: 'inline'
+              script: |
+                # Set Service Principal for login
+                export ARM_SUBSCRIPTION_ID="$(customer1-subscriptionId)"
+                export ARM_CLIENT_ID="$(customer1-clientId)"
+                export ARM_CLIENT_SECRET="$(customer1-clientSecret)"
+                export ARM_TENANT_ID="$(customer1-tenantId)"
+
+                terraform init
+
+                # Apply the previously created artifact
+                terraform apply -auto-approve -no-color -input=false tfplan
+              workingDirectory: '$(Pipeline.Workspace)/plan'
